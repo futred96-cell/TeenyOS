@@ -1,5 +1,5 @@
 ; =============================================================================
-; TeenyOS Kernel
+; TeenyOS Alpha v1.8 — 256-color palette + raw wallpaper
 ; =============================================================================
 
 [BITS 16]
@@ -174,7 +174,6 @@ FONT_BASE      equ 0x5000
 VGA_PALETTE_ADDR equ 0x5800
 SCREEN_H       equ 200
 SCREEN_SIZE    equ 320 * 200 * 4
-WALLPAPER_RENDERED equ 0x400000
 STACK_TOP      equ 0x70000
 APP_STORAGE    equ 0x20000
 APP_EXEC       equ 0x20000
@@ -196,8 +195,6 @@ FS_HEADER_BUF  equ 0x42000
 FS_DATA_BUF    equ 0x44000
 
 WALLPAPER_BUF      equ 0x30000
-TEENY_USED_BYTES   equ (257*512) + 64000 + 64000 + (PAINT_W*PAINT_H) + (257*512) + 2048 + 3232 + 640
-TEENY_USED_KB      equ TEENY_USED_BYTES / 1024
 PAINT_BUF          equ 0x300000
 PAINT_W            equ 240
 PAINT_H            equ 120
@@ -213,7 +210,6 @@ PREFS_CUR          equ 5
 PREFS_USR          equ 6
 PREFS_PWD          equ 22
 PREFS_LOG          equ 38
-COMPRESSED_BUF     equ 0x46000
 
 COLOR_BLACK    equ 0x000000
 PCI_CONFIG_ADDR  equ 0xCF8
@@ -455,17 +451,6 @@ kernel_entry:
     call terminal_newline
 
     call e1000_send_arp
-
-
-
-    ; Wait up to ~1 sec for the ARP reply to arrive
-    mov ecx, 0x6400000
-.arp_wait:
-    call e1000_rx_poll
-    cmp byte [arp_reply_mac], 0
-    jne .arp_ready
-    loop .arp_wait
-.arp_ready:
 
 
     mov edi, PAINT_BUF
@@ -846,6 +831,16 @@ login_draw:
 main_loop:
     call mouse_poll
     call keyboard_poll
+
+    ; Poll network every ~30 frames so ARP replies and packets get caught
+    inc dword [rx_frame_counter]
+    cmp dword [rx_frame_counter], 30
+    jb .no_rx_poll
+    mov dword [rx_frame_counter], 0
+    cmp byte [arp_reply_mac], 0
+    jne .no_rx_poll
+    call e1000_rx_poll
+.no_rx_poll:
 
 
     ; Smooth X
@@ -4510,10 +4505,19 @@ clip_reset:
 
 clear_backbuf:
     pushad
-    mov esi, WALLPAPER_RENDERED
+    mov esi, WALLPAPER_BUF + 768
     mov edi, BACKBUF
-    mov ecx, SCREEN_SIZE / 4
-    rep movsd
+    mov ecx, 64000
+.loop:
+    movzx eax, byte [esi]
+    shl eax, 2
+    add eax, VGA_PALETTE_ADDR
+    mov eax, [eax]
+    mov [edi], eax
+    inc esi
+    add edi, 4
+    dec ecx
+    jnz .loop
     popad
     ret
 
@@ -8746,12 +8750,7 @@ load_wallpaper:
 
 .done:
     popad
-    ; Save rendered wallpaper to its own buffer
-    mov esi, BACKBUF
-    mov edi, WALLPAPER_RENDERED
-    mov ecx, SCREEN_SIZE / 4
-    rep movsd
-    ret
+
 ; =============================================================================
 ; UART (COM1, 0x3F8)
 ; =============================================================================
@@ -11573,6 +11572,68 @@ execute_command:
     call nl_cmd_peer
     ret
 cmd_ramusg_show:
+    pushad
+    call terminal_newline
+
+    mov esi, str_ram_list
+    call terminal_append
+    call terminal_newline
+
+    mov dword [ram_total], 0
+    mov dword [ram_idx], 0
+
+.entry_loop:
+    mov eax, [ram_idx]
+    cmp eax, ram_buffers_count
+    jae .total
+
+    ; ESI = table ptr for this entry
+    mov esi, ram_buffers
+    mov edx, [ram_idx]
+    imul edx, 12
+    add esi, edx
+
+    ; save entry ptr across calls
+    mov [ram_cur], esi
+
+    ; print name
+    mov esi, [esi + 8]
+    call terminal_append
+    mov esi, str_ram_tab
+    call terminal_append
+
+    ; print size in KB
+    mov esi, [ram_cur]
+    mov eax, [esi + 4]
+    shr eax, 10
+    mov edi, ram_str_buf
+    call format_u32
+    mov esi, ram_str_buf
+    call terminal_append
+    mov esi, str_ram_kb
+    call terminal_append
+    call terminal_newline
+
+    ; accumulate total
+    mov esi, [ram_cur]
+    mov eax, [esi + 4]
+    add [ram_total], eax
+
+    inc dword [ram_idx]
+    jmp .entry_loop
+
+.total:
+    call terminal_newline
+    mov esi, str_ram_hdr2
+    call terminal_append
+    mov eax, [ram_total]
+    shr eax, 10
+    mov edi, ram_str_buf
+    call format_u32
+    mov esi, ram_str_buf
+    call terminal_append
+    mov esi, str_ram_kb
+    call terminal_append
     call terminal_newline
 
     mov esi, str_ramusg_total
@@ -11584,23 +11645,14 @@ cmd_ramusg_show:
     call terminal_append
     mov esi, str_kb
     call terminal_append
-
     call terminal_newline
-    mov esi, str_ramusg_used
-    call terminal_append
-    mov eax, TEENY_USED_KB
-    mov edi, ram_str_buf
-    call format_u32
-    mov esi, ram_str_buf
-    call terminal_append
-    mov esi, str_kb
-    call terminal_append
 
-    call terminal_newline
     mov esi, str_ramusg_free
     call terminal_append
     mov eax, [RAM_INFO_ADDR]
-    sub eax, TEENY_USED_KB
+    mov ebx, [ram_total]
+    shr ebx, 10
+    sub eax, ebx
     jns .ok
     xor eax, eax
 .ok:
@@ -11610,7 +11662,13 @@ cmd_ramusg_show:
     call terminal_append
     mov esi, str_kb
     call terminal_append
+    call terminal_newline
+    popad
     ret
+
+ram_total:  dd 0
+ram_idx:    dd 0
+ram_cur:    dd 0
 
 format_u32:
     push ebp
@@ -12331,6 +12389,51 @@ str_e1000_tx_ok:  db '  e1000: TX ring ready',0
 str_e1000_tx_snt: db '  e1000: packet sent (DD=1)',0
 str_e1000_tx_bad: db '  e1000: TX timeout',0
 str_e1000_rx_ok:  db '  e1000: RX ring ready',0
+t_start:       dd 0
+t_redraw:      dd 0
+t_blit:        dd 0
+redraw_count:  dd 0
+rx_frame_counter:  dd 0
+str_t_redraw:  db 'REDRAW=',0
+str_t_blit:    db ' BLIT=',0
+; Buffer table for RAM reporting. Each entry:
+;   dd start_address
+;   dd size_in_bytes
+;   dd name_string_ptr
+ram_buffers:
+    dd 0x7E00,        257*512,        str_rb_kernel
+    dd 0x20000,       65536,          str_rb_apps
+    dd 0x30000,       64000,          str_rb_wallpaper
+    dd 0x50000,       8192,           str_rb_font
+    dd 0x60000,       8192,           str_rb_calltable
+    dd 0x70000,       65536,          str_rb_stack
+    dd 0x200000,      SCREEN_SIZE,    str_rb_backbuf
+    dd 0x300000,      PAINT_W*PAINT_H, str_rb_paint
+    dd 0x56000,       E1000_TX_DESC_COUNT*E1000_TX_DESC_SIZE, str_rb_e1000t
+    dd 0x57000,       E1000_RX_DESC_COUNT*E1000_RX_DESC_SIZE, str_rb_e1000r
+    dd 0x58000,       E1000_TX_BUF_SIZE, str_rb_e1000tbuf
+    dd 0x5C000,       E1000_RX_DESC_COUNT*E1000_RX_BUF_SIZE, str_rb_e1000rbuf
+ram_buffers_end:
+ram_buffers_count equ (ram_buffers_end - ram_buffers) / 12
+
+str_rb_kernel:     db 'kernel',0
+str_rb_apps:       db 'apps',0
+str_rb_wallpaper:  db 'wallpaper',0
+str_rb_font:       db 'font',0
+str_rb_calltable:  db 'calltable',0
+str_rb_stack:      db 'stack',0
+str_rb_backbuf:    db 'backbuf',0
+str_rb_paint:      db 'paint',0
+str_rb_e1000t:     db 'e1000 tx desc',0
+str_rb_e1000r:     db 'e1000 rx desc',0
+str_rb_e1000tbuf:  db 'e1000 tx buf',0
+str_rb_e1000rbuf:  db 'e1000 rx buf',0
+
+str_ram_list:      db 'Buffer',9,'Size (KB)',0
+str_ram_hdr2:      db 'TOTAL USED: ',0
+str_ram_kb:        db ' KB',0
+str_ram_tab:       db '  ',0
+str_ram_newline:   db 10,0
 str_sb16_ok:   db 'SB16 OK',0
 str_playing:  db 'Playing tone...',0
 sb16_buf:     times 512 db 0
