@@ -35,10 +35,22 @@ You need NASM and QEMU. On Windows, just run:
 
 ## Status
 
-Beta (Havent changed actual UI to beta, in UI Its still "Alpha 1.8". Tested only in QEMU. Not tested on real hardware or other
+Beta (Havent changed actual UI to beta, in UI Its still "Alpha 1.8".) Tested only in QEMU. Not tested on real hardware or other
 emulators yet.
 
-Known working:
+## AI Usage (Deepseek)
+
+Debug lines for SB16
+The wallpaper
+Preferences
+Cursor color
+login screen
+window resize
+paint
+30% Of the UI
+the clock
+
+## Known working:
 - QEMU (qemu-system-x86_64, i386 machine, e1000 NIC, sb16)
 
 Not tested:
