@@ -35,7 +35,7 @@ You need NASM and QEMU. On Windows, just run:
 
 ## Status
 
-Beta (Havent changed actual UI to beta, in UI Its still "Alpha 1.8".) Tested only in QEMU. Not tested on real hardware or other
+Beta (Havent changed actual UI to beta, in UI Its still "Alpha 1.8"). Tested only in QEMU. Not tested on real hardware or other
 emulators yet.
 
 ## AI Usage (Deepseek)
