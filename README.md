@@ -40,15 +40,15 @@ emulators yet.
 
 ## AI Usage (Deepseek)
 
-Debug lines for SB16
-The wallpaper
-Preferences
-Cursor color
-login screen
-window resize
-paint
-30% Of the UI
-the clock
+- Debug lines for SB16
+- The wallpaper
+- Preferences
+- Cursor color
+- Login screen
+- Window resize
+- Paint
+- 30% of the UI
+- The clock
 
 ## Known working:
 - QEMU (qemu-system-x86_64, i386 machine, e1000 NIC, sb16)
